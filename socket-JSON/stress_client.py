@@ -84,17 +84,20 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                         # Update our local view of active clients (keep as ints to match server IDs)
                         current_clients = set(msg.get("clients", []))
                         client_state.active_clients = current_clients
+                        print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: list -> {sorted(list(client_state.active_clients))}")
                         # print(f"[Client {client_idx} (ID: {client_state.client_id})] Active clients updated: {list(client_state.active_clients)}")
                     elif msg.get("type") == "message":
                         from_id = msg.get("from")
                         content = msg.get("message")
+                        print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: message from {from_id}")
                         # print(f"[Client {client_idx} (ID: {client_state.client_id})] Received from {from_id}: {content[:20]}...")
                     elif msg.get("type") == "history":
                         target_id = msg.get("target_id")
                         messages = msg.get("messages")
+                        print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: history with {target_id} -> {len(messages)} msgs")
                         # print(f"[Client {client_idx} (ID: {client_state.client_id})] Received history with {target_id}: {len(messages)} messages.")
                     elif msg.get("type") == "success":
-                        pass # print(f"[Client {client_idx} (ID: {client_state.client_id})] Message sent confirmation.")
+                        print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: success")
                     elif msg.get("type") == "error":
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Server Error: {msg.get('message')}")
                     # else:
@@ -109,10 +112,15 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
             return
         
         print(f"[Client {client_idx} (ID: {client_state.client_id})] Connected! Starting message flood...")
+        # Immediately request an initial client list to populate state
+        print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: list")
+        send_json(sock, {"command": "list"})
+        time.sleep(0.1)
 
         for i in range(message_count):
             # Periodically request list of clients
             if i % 10 == 0: # Every 10 messages, refresh client list and request history
+                print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: list")
                 send_json(sock, {"command": "list"})
                 time.sleep(0.05) # Small delay to let list response arrive
 
@@ -122,6 +130,7 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                         other_clients = list(client_state.active_clients - {client_state.client_id})
                         if other_clients:
                             history_target_id = random.choice(other_clients)
+                            print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: history {history_target_id}")
                             send_json(sock, {"command": "history", "target_id": str(history_target_id)})
                             time.sleep(0.05)
 
@@ -150,6 +159,7 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                 "target_id": str(target_id_for_forward),
                 "message": message_content
             }
+            print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: forward -> {target_id_for_forward}")
             if not send_json(sock, send_data):
                 print(f"[Client {client_idx} (ID: {client_state.client_id})] Send failed for message {i+1}. Disconnecting.")
                 break
