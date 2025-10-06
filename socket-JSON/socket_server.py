@@ -186,12 +186,35 @@ def handle_client(conn, client_id):
                     })
                     continue
                 
+                # Check if target_id is valid (not greater than highest assigned ID)
+                if target_id > client_counter:
+                    send_json(conn, {
+                        "type": "error",
+                        "message": f"Client {target_id} does not exist (highest ID: {client_counter})"
+                    })
+                    continue
+                
                 messages = get_history(client_id, target_id)
-                send_json(conn, {
+                
+                # Build response with helpful message when empty
+                response = {
                     "type": "history",
                     "target_id": target_id,
-                    "messages": messages
-                })
+                    "messages": messages,
+                    "count": len(messages)
+                }
+                
+                if not messages:
+                    # Check if target is currently online
+                    with clients_lock:
+                        target_online = target_id in clients
+                    
+                    if target_online:
+                        response["message"] = f"No chat history with client {target_id} yet (currently online)"
+                    else:
+                        response["message"] = f"No chat history with client {target_id} (client offline)"
+                
+                send_json(conn, response)
             
             # Unknown command
             else:

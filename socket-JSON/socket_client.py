@@ -86,14 +86,24 @@ def receive_messages(sock):
         
         elif msg_type == "history":
             target_id = msg.get("target_id") #get the target_id from the message
-            messages = msg.get("messages") #get the messages from the message
-            print(f'\n--- History with Client {target_id} ---') #print the target_id
-            for m in messages:
-                ts = m.get("timestamp", "") #get the timestamp from the message
-                print(f'[{ts}] {m["from"]} -> {m["to"]}: {m["message"]}') #print the message
-            print('--- End ---') #print the end
-            print('> ', end='', flush=True) #print the prompt
-        
+            messages = msg.get("messages", []) #get the messages from the message
+            count = msg.get("count", 0) #get the count from the message
+            custom_msg = msg.get("message") #get optional custom message
+            
+            print(f'\n--- History with Client {target_id} ({count} messages) ---')
+            
+            if custom_msg:
+                # Display custom message (e.g., "No chat history with client X")
+                print(custom_msg)
+            elif messages:
+                # Display message history
+                for m in messages:
+                    ts = m.get("timestamp", "")
+                    print(f'[{ts}] {m["from"]} -> {m["to"]}: {m["message"]}')
+            
+            print('--- End ---')
+            print('> ', end='', flush=True)
+            
         elif msg_type == "success":
             print('\n✓ Message sent') #print the message
             print('> ', end='', flush=True) #print the prompt
