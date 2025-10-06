@@ -81,8 +81,8 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                         client_state.ready.set()
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Connected!")
                     elif msg.get("type") == "list":
-                        # Update our local view of active clients
-                        current_clients = set(map(str, msg.get("clients", [])))
+                        # Update our local view of active clients (keep as ints to match server IDs)
+                        current_clients = set(msg.get("clients", []))
                         client_state.active_clients = current_clients
                         # print(f"[Client {client_idx} (ID: {client_state.client_id})] Active clients updated: {list(client_state.active_clients)}")
                     elif msg.get("type") == "message":
@@ -114,7 +114,7 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
             # Periodically request list of clients
             if i % 10 == 0: # Every 10 messages, refresh client list and request history
                 send_json(sock, {"command": "list"})
-                time.sleep(0.01) # Small delay to let list response arrive
+                time.sleep(0.05) # Small delay to let list response arrive
 
                 with client_state.lock:
                     if len(client_state.active_clients) > 1 and client_state.client_id:
@@ -122,8 +122,8 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                         other_clients = list(client_state.active_clients - {client_state.client_id})
                         if other_clients:
                             history_target_id = random.choice(other_clients)
-                            send_json(sock, {"command": "history", "target_id": history_target_id})
-                            time.sleep(0.01)
+                            send_json(sock, {"command": "history", "target_id": str(history_target_id)})
+                            time.sleep(0.05)
 
 
             # Choose a target client for forwarding
