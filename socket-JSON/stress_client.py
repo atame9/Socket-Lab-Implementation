@@ -126,7 +126,7 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
 
         for i in range(message_count):
             # Periodically request list of clients
-            if i % 10 == 0: # Every 10 messages, refresh client list and request history
+            if i % 3 == 0: # More frequent updates to observe history during run
                 print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: list")
                 send_json(sock, {"command": "list"})
                 time.sleep(0.05) # Small delay to let list response arrive
@@ -170,8 +170,26 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
             if not send_json(sock, send_data):
                 print(f"[Client {client_idx} (ID: {client_state.client_id})] Send failed for message {i+1}. Disconnecting.")
                 break
+            else:
+                # Occasionally request history with the target just messaged
+                if random.random() < 0.3:
+                    print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: history {target_id_for_forward}")
+                    send_json(sock, {"command": "history", "target_id": str(target_id_for_forward)})
+                    time.sleep(0.03)
             # print(f"[Client {client_idx} (ID: {client_state.client_id})] Sent message {i+1} to {target_id_for_forward}")
             time.sleep(message_interval)
+
+        # Final history dump after sending all messages
+        print(f"[Client {client_idx} (ID: {client_state.client_id})] Finalizing: requesting list and histories")
+        send_json(sock, {"command": "list"})
+        time.sleep(0.1)
+        with client_state.lock:
+            peers = list((client_state.active_clients - {client_state.client_id}))
+        # Limit to a few peers to reduce output noise
+        for peer in peers[:5]:
+            print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: history {peer}")
+            send_json(sock, {"command": "history", "target_id": str(peer)})
+            time.sleep(0.05)
 
     except ConnectionRefusedError:
         print(f"[Client {client_idx}] Connection refused. Is server running on {host}:{port}?")
