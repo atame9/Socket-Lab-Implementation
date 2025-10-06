@@ -53,7 +53,19 @@ class ClientState:
         self.ready = threading.Event()
         self.lock = threading.Lock() # Protects active_clients and client_id
 
-def stress_client_thread(host, port, client_idx, message_count, message_interval):
+
+def choose_target(client_state, deterministic: bool):
+    """Choose a target client ID. Deterministic picks lowest peer; else random."""
+    with client_state.lock:
+        peers = sorted(list(client_state.active_clients - {client_state.client_id}))
+        if not peers:
+            return client_state.client_id
+        if deterministic:
+            return peers[0]
+        return random.choice(peers)
+
+
+def stress_client_thread(host, port, client_idx, message_count, message_interval, deterministic_targets):
     """
     Function run by each client thread to connect and send messages.
     """
@@ -85,12 +97,9 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                         current_clients = set(msg.get("clients", []))
                         client_state.active_clients = current_clients
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: list -> {sorted(list(client_state.active_clients))}")
-                        # print(f"[Client {client_idx} (ID: {client_state.client_id})] Active clients updated: {list(client_state.active_clients)}")
                     elif msg.get("type") == "message":
                         from_id = msg.get("from")
-                        content = msg.get("message")
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: message from {from_id}")
-                        # print(f"[Client {client_idx} (ID: {client_state.client_id})] Received from {from_id}: {content[:20]}...")
                     elif msg.get("type") == "history":
                         target_id = msg.get("target_id")
                         messages = msg.get("messages")
@@ -102,13 +111,10 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                             to = entry.get("to")
                             msg_text = entry.get("message", "")
                             print(f"    [{ts}] {frm} -> {to}: {msg_text}")
-                        # print(f"[Client {client_idx} (ID: {client_state.client_id})] Received history with {target_id}: {len(messages)} messages.")
                     elif msg.get("type") == "success":
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: success")
                     elif msg.get("type") == "error":
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Server Error: {msg.get('message')}")
-                    # else:
-                    #     print(f"[Client {client_idx} (ID: {client_state.client_id})] Unhandled msg: {msg.get('type')}")
 
         receiver_thread = threading.Thread(target=client_receiver, daemon=True)
         receiver_thread.start()
@@ -124,42 +130,32 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
         send_json(sock, {"command": "list"})
         time.sleep(0.1)
 
+        seq = 0
         for i in range(message_count):
-            # Periodically request list of clients
-            if i % 3 == 0: # More frequent updates to observe history during run
+            # Periodically request list of clients (more frequent to observe histories)
+            if i % 3 == 0:
                 print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: list")
                 send_json(sock, {"command": "list"})
-                time.sleep(0.05) # Small delay to let list response arrive
+                time.sleep(0.05)
 
                 with client_state.lock:
                     if len(client_state.active_clients) > 1 and client_state.client_id:
-                        # Pick a random peer for history request
                         other_clients = list(client_state.active_clients - {client_state.client_id})
                         if other_clients:
-                            history_target_id = random.choice(other_clients)
+                            history_target_id = other_clients[0] if deterministic_targets else random.choice(other_clients)
                             print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: history {history_target_id}")
                             send_json(sock, {"command": "history", "target_id": str(history_target_id)})
                             time.sleep(0.05)
 
-
             # Choose a target client for forwarding
-            target_id_for_forward = None
-            with client_state.lock:
-                if len(client_state.active_clients) > 1 and client_state.client_id:
-                    # Get a list of active clients *excluding* self
-                    other_clients = list(client_state.active_clients - {client_state.client_id})
-                    if other_clients:
-                        target_id_for_forward = random.choice(other_clients)
-                if not target_id_for_forward and client_state.client_id: # Fallback to self if no other clients or not assigned ID yet
-                    target_id_for_forward = client_state.client_id
-
+            target_id_for_forward = choose_target(client_state, deterministic_targets)
             if not target_id_for_forward:
                 print(f"[Client {client_idx} (ID: {client_state.client_id})] No valid target for forward, skipping message {i+1}.")
-                time.sleep(message_interval) # Still respect interval
+                time.sleep(message_interval)
                 continue
 
-            message_content = f"Hello from {client_state.client_id}! Message {i+1}."
-            # Optionally add varied message sizes: message_content = "A" * random.randint(50, 500)
+            seq += 1
+            message_content = f"[seq={seq}] Hello from {client_state.client_id}! Message {i+1}."
 
             send_data = {
                 "command": "forward",
@@ -171,25 +167,24 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                 print(f"[Client {client_idx} (ID: {client_state.client_id})] Send failed for message {i+1}. Disconnecting.")
                 break
             else:
-                # Occasionally request history with the target just messaged
-                if random.random() < 0.3:
-                    print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: history {target_id_for_forward}")
-                    send_json(sock, {"command": "history", "target_id": str(target_id_for_forward)})
-                    time.sleep(0.03)
-            # print(f"[Client {client_idx} (ID: {client_state.client_id})] Sent message {i+1} to {target_id_for_forward}")
+                # After success is received by receiver thread, give a brief window then request history with this target
+                time.sleep(0.08)
+                print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: history {target_id_for_forward}")
+                send_json(sock, {"command": "history", "target_id": str(target_id_for_forward)})
+                time.sleep(0.03)
+
             time.sleep(message_interval)
 
         # Final history dump after sending all messages
         print(f"[Client {client_idx} (ID: {client_state.client_id})] Finalizing: requesting list and histories")
         send_json(sock, {"command": "list"})
-        time.sleep(0.1)
+        time.sleep(0.2)
         with client_state.lock:
             peers = list((client_state.active_clients - {client_state.client_id}))
-        # Limit to a few peers to reduce output noise
         for peer in peers[:5]:
             print(f"[Client {client_idx} (ID: {client_state.client_id})] Sending: history {peer}")
             send_json(sock, {"command": "history", "target_id": str(peer)})
-            time.sleep(0.05)
+            time.sleep(0.08)
 
     except ConnectionRefusedError:
         print(f"[Client {client_idx}] Connection refused. Is server running on {host}:{port}?")
@@ -201,10 +196,12 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
             sock.close()
             print(f"[Client {client_idx}] Disconnected.")
 
+
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python stress_client.py <HOST> <PORT> <NUM_CLIENTS> [MESSAGES_PER_CLIENT] [MESSAGE_INTERVAL_SECONDS]")
-        print("Example: python stress_client.py 10.128.0.2 9999 50 100 0.1")
+        print("Usage: python stress_client.py <HOST> <PORT> <NUM_CLIENTS> [MESSAGES_PER_CLIENT] [MESSAGE_INTERVAL_SECONDS] [MODE]")
+        print("MODE: 'det' for deterministic targets, 'rand' for random (default)")
+        print("Example: python stress_client.py 10.128.0.2 9999 50 100 0.1 det")
         sys.exit(1)
 
     host = sys.argv[1]
@@ -212,13 +209,15 @@ def main():
     num_clients = int(sys.argv[3])
     messages_per_client = int(sys.argv[4]) if len(sys.argv) > 4 else 50
     message_interval = float(sys.argv[5]) if len(sys.argv) > 5 else 0.05 # seconds
+    mode = sys.argv[6] if len(sys.argv) > 6 else 'rand'
+    deterministic_targets = (mode.lower() == 'det')
 
     print(f"Starting stress test with {num_clients} clients connecting to {host}:{port}")
     print(f"Each client will send {messages_per_client} messages with {message_interval}s interval.")
 
     threads = []
     for i in range(num_clients):
-        t = threading.Thread(target=stress_client_thread, args=(host, port, i + 1, messages_per_client, message_interval))
+        t = threading.Thread(target=stress_client_thread, args=(host, port, i + 1, messages_per_client, message_interval, deterministic_targets))
         threads.append(t)
         t.start()
         time.sleep(0.01) # Small delay between starting clients
