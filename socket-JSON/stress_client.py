@@ -95,6 +95,13 @@ def stress_client_thread(host, port, client_idx, message_count, message_interval
                         target_id = msg.get("target_id")
                         messages = msg.get("messages")
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: history with {target_id} -> {len(messages)} msgs")
+                        # Print each entry to verify ordering
+                        for entry in messages:
+                            ts = entry.get("timestamp", "")
+                            frm = entry.get("from")
+                            to = entry.get("to")
+                            msg_text = entry.get("message", "")
+                            print(f"    [{ts}] {frm} -> {to}: {msg_text}")
                         # print(f"[Client {client_idx} (ID: {client_state.client_id})] Received history with {target_id}: {len(messages)} messages.")
                     elif msg.get("type") == "success":
                         print(f"[Client {client_idx} (ID: {client_state.client_id})] Received: success")
