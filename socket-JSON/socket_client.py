@@ -116,26 +116,26 @@ def main():
 
     try:
         sock.connect((host, port))
-        print(f'Connecting to {host}:{port}...')
+        print(f'Connecting to {host}:{port}...') #print the connection message
     except ConnectionRefusedError:
-        print(f'Connection refused. Is server running on {host}:{port}?')
+        print(f'Connection refused. Is server running on {host}:{port}?') #print the connection refused message
         return
     except Exception as e:
-        print(f'Connection error: {e}')
+        print(f'Connection error: {e}') #print the connection error message
         return
     
     # Start a background thread to continuously receive and render server messages
     receiver = threading.Thread(target=receive_messages, args=(sock,))
-    receiver.daemon = True
+    receiver.daemon = True #allows the main program to exit even if this thread is running
     receiver.start()
     
     # Wait until the welcome message arrives so we know our client_id
     if not ready_event.wait(timeout=5):
-        print("Timeout waiting for server welcome")
+        print("Timeout waiting for server welcome") #print the timeout message
         sock.close()
         return
     
-    print("\nCommands:")
+    print("\nCommands:") #print the commands
     print("  list")
     print("  forward <ID> <message>")
     print("  history <ID>")
@@ -147,21 +147,21 @@ def main():
             inp = input('> ').strip()
             
             if not inp:
-                continue
+                continue #continue the loop if the input is empty
             
-            parts = inp.split(maxsplit=2)
+            parts = inp.split(maxsplit=2) #split the input into parts
             command = parts[0].lower()
             
             if command == "exit":
                 send_json(sock, {"command": "exit"})
-                break
+                break #break the loop if the command is exit
             
             elif command == "list":
-                send_json(sock, {"command": "list"})
+                send_json(sock, {"command": "list"}) 
             
             elif command == "forward":
                 if len(parts) < 3:
-                    print("Usage: forward <ID> <message>")
+                    print("Usage: forward <ID> <message>") #print the usage message
                     continue
                 
                 # Target is a client_id assigned by the server. Message is free text.
@@ -173,7 +173,7 @@ def main():
             
             elif command == "history":
                 if len(parts) < 2:
-                    print("Usage: history <ID>")
+                    print("Usage: history <ID>") #print the usage message
                     continue
                 
                 send_json(sock, {
@@ -182,20 +182,17 @@ def main():
                 })
             
             else:
-                print(f"Unknown command: {command}")
+                print(f"Unknown command: {command}") #print the unknown command message
     
-    except KeyboardInterrupt:
+    except KeyboardInterrupt: #if the user interrupts the program, print the disconnecting message
         print("\n\nDisconnecting...")
         send_json(sock, {"command": "exit"})
-    except EOFError:
+    except EOFError: #if the user ends the program, print the disconnecting message
         print("\nEOF detected, disconnecting...")
         send_json(sock, {"command": "exit"})
-    finally:
+    finally: #finally, close the socket
         sock.close()
 
 
 if __name__ == '__main__':
     main()
-
-    
-   
