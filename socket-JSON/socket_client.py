@@ -10,6 +10,7 @@ import os
 
 client_id = None #this is set by the server in the initial welcome message
 ready_event = threading.Event() #this is used to block the prompt until welcome from server is received
+goodbye_event = threading.Event()
 
 MAX_MESSAGE_SIZE = 1024 * 1024  # 1MB maximum message size to avoid misuse
 
@@ -103,6 +104,7 @@ def receive_messages(sock):
         
         elif msg_type == "goodbye":
             print('\nGoodbye!') #print the goodbye message
+            goodbye_event.set()
             break #break the loop if the message is None
         
 def main():
@@ -126,7 +128,7 @@ def main():
     
     # Start a background thread to continuously receive and render server messages
     receiver = threading.Thread(target=receive_messages, args=(sock,))
-    receiver.daemon = True #allows the main program to exit even if this thread is running
+    receiver.daemon = False
     receiver.start()
     
     # Wait until the welcome message arrives so we know our client_id
@@ -154,6 +156,11 @@ def main():
             
             if command == "exit":
                 send_json(sock, {"command": "exit"})
+                try:
+                    sock.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+                goodbye_event.wait(timeout=1.0)
                 break #break the loop if the command is exit
             
             elif command == "list":
@@ -187,10 +194,24 @@ def main():
     except KeyboardInterrupt: #if the user interrupts the program, print the disconnecting message
         print("\n\nDisconnecting...")
         send_json(sock, {"command": "exit"})
+        try:
+            sock.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        goodbye_event.wait(timeout=1.0)
     except EOFError: #if the user ends the program, print the disconnecting message
         print("\nEOF detected, disconnecting...")
         send_json(sock, {"command": "exit"})
+        try:
+            sock.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        goodbye_event.wait(timeout=1.0)
     finally: #finally, close the socket
+        try:
+            receiver.join(timeout=1.0)
+        except Exception:
+            pass
         sock.close()
 
 
