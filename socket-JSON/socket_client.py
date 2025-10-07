@@ -144,6 +144,7 @@ def main():
     # Wait until the welcome message arrives so we know our client_id
     if not ready_event.wait(timeout=5):
         print("Timeout waiting for server welcome") #print the timeout message
+        sock.shutdown(socket.SHUT_RDWR)
         sock.close()
         return
     
